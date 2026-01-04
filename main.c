@@ -75,16 +75,18 @@ int host_connect(char *domain, struct addrinfo *info) {
     // get the file descriptor for the socket
     inet_ntop(p->ai_family, addr, ipstr, sizeof(ipstr));
     printf("  %s: %s\n", ipver, ipstr);
+
+    // no error on connection so we've found a working addrinfo
     break;
   }
 
-	if (p == NULL) {
-		freeaddrinfo(info);
-		fprintf(stderr, "ERROR: failed to connect\n");
-		return -1;
-	}
-	freeaddrinfo(info);
-	fprintf(stderr, "connected.\n");
+  if (p == NULL) {
+    freeaddrinfo(info);
+    fprintf(stderr, "ERROR: failed to connect\n");
+    return -1;
+  }
+  freeaddrinfo(info);
+  fprintf(stderr, "connected.\n");
 
   return fd;
 }
@@ -126,15 +128,6 @@ int main(int argc, char **argv) {
 
   char *host = "irc.libera.chat";
 
-  // NOTE: binding not needed as a client program
-  // avoid "Address already in use." errors when rerunning the program
-  // int yes = 1;
-  // setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
-  // int b_err;
-  // if ((b_err = bind(s, info->ai_addr, info->ai_addrlen) != 0)) {
-  //   fprintf(stderr, "bind error: %d\n", errno);
-  // }
-
   // output struct for getaddrinfo
   struct addrinfo info;
 
@@ -148,13 +141,41 @@ int main(int argc, char **argv) {
 
   br_sslio_init(&ioc, &sc.eng, sock_read, &fd, sock_write, &fd);
 
-  // int c_err;
-  // if ((c_err = connect(fd, info.ai_addr, sizeof(struct sockaddr))) != 0) {
-  //   fprintf(stderr, "connect error: %d\n", errno);
-  // }
+  // message formats
+  // stream of bytes, separated by CRLF, UTF-8 encoded
+  // only process a message once fully read until the CRLF
+  // message structure:
+  // 512 bytes max, unless there are tags, in which case allow 8191 additional
+  // bytes
+  // <message> = @<tags> :<source> command parameters
+  // <tags> = <key>=<value>;<key>=<value>
+  // don't send more than 15 parameters, but accept any number
+  // ignore empty lines
 
-  // close(fd);
-  // freeaddrinfo(&info);
+  // br_sslio_write_all(&ioc, "CAP LS 302/r/n", 12);
+  br_sslio_write_all(&ioc, "NICK benmuth/r/n", 12);
+  br_sslio_write_all(&ioc, "USER benmuth 0 * Ben Muthalaly/r/n", 32);
+
+  br_sslio_flush(&ioc);
+
+  /*
+   * Read the server's response. We use here a small 512-byte buffer,
+   * but most of the buffering occurs in the client context: the
+   * server will send full records (up to 16384 bytes worth of data
+   * each), and the client context buffers one full record at a time.
+   */
+  for (;;) {
+    int rlen;
+    unsigned char tmp[512];
+
+    rlen = br_sslio_read(&ioc, tmp, sizeof tmp);
+    if (rlen < 0) {
+      break;
+    }
+    fwrite(tmp, 1, rlen, stdout);
+  }
+
+  close(fd);
 
   return 0;
 }
