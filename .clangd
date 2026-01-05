@@ -9,12 +9,13 @@ CompileFlags:
     - -Wdouble-promotion
     - -Wconversion
     - -Wno-sign-conversion
+    - -IBearSSL/inc
+    - -I/home/ben/code/c/bmm
 Diagnostics:
   UnusedIncludes: Strict
   MissingIncludes: Strict
   ClangTidy:
     Add:
-      - readability-*
       - bugprone-*
       - performance-*
       - modernize-*

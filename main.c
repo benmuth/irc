@@ -4,6 +4,9 @@
 #include <string.h>
 #include <sys/socket.h>
 
+#define BMM_IMPLEMENTATION
+#include "bmm.h"
+
 #include "BearSSL/inc/bearssl_ssl.h"
 
 // Trust anchors declared in trust_anchors.c
