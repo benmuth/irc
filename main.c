@@ -39,7 +39,8 @@ int host_connect(char *domain, struct addrinfo *info) {
   hints.ai_socktype = SOCK_STREAM;
   // hints.ai_flags = AI_PASSIVE;
 
-  if ((gai_err = getaddrinfo(domain, "6697", &hints, &info)) != 0) {
+  gai_err = getaddrinfo(domain, "6697", &hints, &info);
+  if (gai_err != 0) {
     fprintf(stderr, "gai error: %s\n", gai_strerror(gai_err));
     exit(1);
   }
@@ -126,26 +127,38 @@ static int sock_write(void *ctx, const unsigned char *buf, size_t len) {
   }
 }
 
-int main(int argc, char **argv) {
+int send_msg(br_sslio_context *ioc, char *msg, size_t len) {
+  br_sslio_write_all(ioc, msg, len);
+  br_sslio_flush(ioc);
+  return 0;
+}
+
+void register_conn(br_sslio_context *ioc) {
+  char *msg = "NICK muscle_chestbrook\r\nUSER muscle_chestbrook 0 * :Muscle Chestbrook\r\n";
+  send_msg(ioc, msg, bmm_strlen(msg));
+  br_sslio_flush(ioc);
+}
+
+int main(void) {
+  char *host = "irc.libera.chat";
+  // output struct for getaddrinfo
+  struct addrinfo info;
+
+  // set up SSL connection
+  int fd;
   br_ssl_client_context sc;
   br_x509_minimal_context xc;
   unsigned char iobuf[BR_SSL_BUFSIZE_BIDI];
   br_sslio_context ioc;
+  {
+    fd = host_connect(host, &info);
 
-  char *host = "irc.libera.chat";
+    br_ssl_client_init_full(&sc, &xc, TAs, TAs_NUM);
+    br_ssl_engine_set_buffer(&sc.eng, iobuf, sizeof iobuf, 1);
+    br_ssl_client_reset(&sc, host, 0);
+    br_sslio_init(&ioc, &sc.eng, sock_read, &fd, sock_write, &fd);
+  }
 
-  // output struct for getaddrinfo
-  struct addrinfo info;
-
-  int fd = host_connect(host, &info);
-
-  br_ssl_client_init_full(&sc, &xc, TAs, TAs_NUM);
-
-  br_ssl_engine_set_buffer(&sc.eng, iobuf, sizeof iobuf, 1);
-
-  br_ssl_client_reset(&sc, host, 0);
-
-  br_sslio_init(&ioc, &sc.eng, sock_read, &fd, sock_write, &fd);
 
   // message formats
   // stream of bytes, separated by CRLF, UTF-8 encoded
@@ -157,12 +170,7 @@ int main(int argc, char **argv) {
   // <tags> = <key>=<value>;<key>=<value>
   // don't send more than 15 parameters, but accept any number
   // ignore empty lines
-
-  // br_sslio_write_all(&ioc, "CAP LS 302/r/n", 12);
-  br_sslio_write_all(&ioc, "NICK benmuth/r/n", 12);
-  br_sslio_write_all(&ioc, "USER benmuth 0 * Ben Muthalaly/r/n", 32);
-
-  br_sslio_flush(&ioc);
+  register_conn(&ioc);
 
   /*
    * Read the server's response. We use here a small 512-byte buffer,
