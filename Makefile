@@ -1,5 +1,6 @@
 CC = clang
-CFLAGS = -g -I BearSSL/inc
+# flags from https://nullprogram.com/blog/2023/04/29/
+CFLAGS = -g -I BearSSL/inc -Wall -Wextra -Werror -Wpedantic -Wdouble-promotion -Wconversion -Wno-sign-conversion
 LDFLAGS = -fuse-ld=wild
 LIBS = BearSSL/build/libbearssl.a
 

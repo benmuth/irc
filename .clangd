@@ -2,3 +2,30 @@ CompileFlags:
   Add:
     - -xc
     - -std=c11
+    - -Wall
+    - -Wextra
+    - -pedantic
+    - -Werror
+    - -Wdouble-promotion
+    - -Wconversion
+    - -Wno-sign-conversion
+Diagnostics:
+  UnusedIncludes: Strict
+  MissingIncludes: Strict
+  ClangTidy:
+    Add:
+      - readability-*
+      - bugprone-*
+      - performance-*
+      - modernize-*
+    Remove:
+      - modernize-use-trailing-return-type
+
+Hover:
+  ShowAKA: Yes
+
+Completion:
+  AllScopes: Yes
+
+Index:
+  Background: Build
