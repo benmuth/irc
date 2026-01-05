@@ -5,7 +5,10 @@
 #include <sys/socket.h>
 
 #include "BearSSL/inc/bearssl_ssl.h"
-#include "trust_anchors.c"
+
+// Trust anchors declared in trust_anchors.c
+extern const br_x509_trust_anchor TAs[];
+extern const size_t TAs_NUM;
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <stdio.h>

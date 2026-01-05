@@ -1,6 +1,8 @@
 // to regen:
 //./BearSSL/build/brssl ta /etc/ssl/certs/ca-certificates.crt > trust_anchors.c
 
+#include "BearSSL/inc/bearssl_x509.h"
+
 static const unsigned char TA0_DN[] = {
 	0x30, 0x42, 0x31, 0x12, 0x30, 0x10, 0x06, 0x03, 0x55, 0x04, 0x03, 0x0C,
 	0x09, 0x41, 0x43, 0x43, 0x56, 0x52, 0x41, 0x49, 0x5A, 0x31, 0x31, 0x10,
@@ -6566,7 +6568,7 @@ static const unsigned char TA145_RSA_E[] = {
 	0x01, 0x00, 0x01
 };
 
-static const br_x509_trust_anchor TAs[146] = {
+const br_x509_trust_anchor TAs[146] = {
 	{
 		{ (unsigned char *)TA0_DN, sizeof TA0_DN },
 		BR_X509_TA_CA,
@@ -8175,4 +8177,4 @@ static const br_x509_trust_anchor TAs[146] = {
 	}
 };
 
-#define TAs_NUM   146
+const size_t TAs_NUM = 146;
