@@ -4,9 +4,6 @@
 #include <string.h>
 #include <sys/socket.h>
 
-#define BMM_IMPLEMENTATION
-#include "bmm.h"
-
 #include "BearSSL/inc/bearssl_ssl.h"
 
 // Trust anchors declared in trust_anchors.c
@@ -135,7 +132,7 @@ int send_msg(br_sslio_context *ioc, char *msg, size_t len) {
 
 void register_conn(br_sslio_context *ioc) {
   char *msg = "NICK muscle_chestbrook\r\nUSER muscle_chestbrook 0 * :Muscle Chestbrook\r\n";
-  send_msg(ioc, msg, bmm_strlen(msg));
+  send_msg(ioc, msg, strlen(msg));
   br_sslio_flush(ioc);
 }
 

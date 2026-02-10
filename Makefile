@@ -1,7 +1,10 @@
 CC = clang
 # flags from https://nullprogram.com/blog/2023/04/29/
-CFLAGS = -g -fdebug-info-for-profiling -fdebug-macro  -Wall -Wextra -Werror -pedantic -Wdouble-promotion -Wconversion -Wno-sign-conversion -I BearSSL/inc -I ~/code/c/bmm -fsanitize=address,undefined -fsanitize-trap
-LDFLAGS = -fuse-ld=wild -fsanitize=address,undefined -fsanitize-trap
+CFLAGS = -g -fdebug-info-for-profiling -Wall -Wextra -Werror -pedantic -Wdouble-promotion -Wconversion -Wno-sign-conversion -I BearSSL/inc -I ~/code/c/bmm -fsanitize=address,undefined -fsanitize-trap
+LDFLAGS = -fsanitize=address,undefined -fsanitize-trap
+ifeq ($(shell uname -s),Linux)
+    LDFLAGS += -fuse-ld=wild
+endif
 LIBS = BearSSL/build/libbearssl.a
 
 irc: main.o trust_anchors.o
