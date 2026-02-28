@@ -131,13 +131,21 @@ int send_msg(br_sslio_context *ioc, char *msg, size_t len) {
 }
 
 void register_conn(br_sslio_context *ioc) {
-  char *msg = "NICK muscle_chestbrook\r\nUSER muscle_chestbrook 0 * :Muscle Chestbrook\r\n";
-  send_msg(ioc, msg, strlen(msg));
+  char *capability_negotiation_start = "CAP LS 302\r\n";
+  char *pass = "PASS password\r\n";
+  char *nick_user = "NICK ben\r\nUSER ben 0 * :Ben M\r\n";
+  char *cap_end = "CAP END\r\n";
+  send_msg(ioc, capability_negotiation_start, strlen(capability_negotiation_start));
+  send_msg(ioc, pass, strlen(pass));
+  send_msg(ioc, nick_user, strlen(nick_user));
+
+  send_msg(ioc, cap_end, strlen(cap_end));
   br_sslio_flush(ioc);
 }
 
 int main(void) {
-  char *host = "irc.libera.chat";
+  // char *host = "irc.libera.chat";
+  char *host = "testnet.ergo.chat";
   // output struct for getaddrinfo
   struct addrinfo info;
 
