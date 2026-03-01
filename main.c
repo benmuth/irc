@@ -147,7 +147,7 @@ void register_conn(br_sslio_context *ioc) {
 }
 
 void send_quit(br_sslio_context *ioc) {
-  char *quit = "QUIT :Gone to have lunch";
+  char *quit = "QUIT :Gone to have lunch\r\n";
   send_msg(ioc, quit, strlen(quit));
   br_sslio_flush(ioc);
 }
