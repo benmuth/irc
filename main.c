@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <cstdio>
 #include <errno.h>
 #include <netinet/in.h>
 #include <stdlib.h>
@@ -16,6 +17,21 @@ extern const size_t TAs_NUM;
 #include <stdio.h>
 #include <sys/types.h>
 #include <unistd.h>
+
+// message formats
+// stream of bytes, separated by CRLF, UTF-8 encoded
+// only process a message once fully read until the CRLF
+// message structure:
+// 512 bytes max, unless there are tags, in which case allow 8191 additional
+// bytes
+// <message> = @<tags> :<source> command parameters
+// <tags> = <key>=<value>;<key>=<value>
+// don't send more than 15 parameters, but accept any number
+// ignore empty lines
+
+///////////////////////////////////////
+// Networking
+///////////////////////////////////////
 
 // connects to IRC server over IRC via TLS
 int host_connect(char *domain, struct addrinfo *info) {
@@ -43,8 +59,6 @@ int host_connect(char *domain, struct addrinfo *info) {
     fprintf(stderr, "gai error: %s\n", gai_strerror(gai_err));
     exit(1);
   }
-
-  // printf("IP Addresses for %s\n", domain);
 
   char ipstr[INET6_ADDRSTRLEN];
   // iterate through addrinfos
@@ -126,33 +140,42 @@ static int sock_write(void *ctx, const unsigned char *buf, size_t len) {
   }
 }
 
-int send_msg(br_sslio_context *ioc, char *msg, size_t len) {
+///////////////////////////////////////
+// SSL
+///////////////////////////////////////
+
+typedef struct {
+  br_ssl_client_context sc;
+  br_x509_minimal_context xc;
+  unsigned char iobuf[BR_SSL_BUFSIZE_BIDI];
+  br_sslio_context ioc;
+  int fd;
+} SSL_Connection;
+
+void setup_SSL(SSL_Connection *conn, char *host, struct addrinfo info) {
+  conn->fd = host_connect(host, &info);
+  br_ssl_client_init_full(&conn->sc, &conn->xc, TAs, TAs_NUM);
+  br_ssl_engine_set_buffer(&conn->sc.eng, conn->iobuf, sizeof conn->iobuf, 1);
+  br_ssl_client_reset(&conn->sc, host, 0);
+  br_sslio_init(&conn->ioc, &conn->sc.eng, sock_read, &conn->fd, sock_write,
+                &conn->fd);
+}
+
+void send_msg(br_sslio_context *ioc, char *msg, size_t len) {
   br_sslio_write_all(ioc, msg, len);
   br_sslio_flush(ioc);
-  return 0;
 }
 
-void register_conn(br_sslio_context *ioc) {
-  char *capability_negotiation_start = "CAP LS 302\r\n";
-  char *pass = "PASS password\r\n";
-  char *nick_user = "NICK ben\r\nUSER ben 0 * :Ben M\r\n";
-  char *cap_end = "CAP END\r\n";
-  send_msg(ioc, capability_negotiation_start,
-           strlen(capability_negotiation_start));
-  send_msg(ioc, pass, strlen(pass));
-  send_msg(ioc, nick_user, strlen(nick_user));
+///////////////////////////////////////
+// IRC
+///////////////////////////////////////
 
-  send_msg(ioc, cap_end, strlen(cap_end));
-  br_sslio_flush(ioc);
-}
+typedef struct {
+  char *name;
+  void (*handler)(br_sslio_context *ioc, char *str);
+} Command_Handler;
 
-void send_quit(br_sslio_context *ioc) {
-  char *quit = "QUIT :Gone to have lunch\r\n";
-  send_msg(ioc, quit, strlen(quit));
-  br_sslio_flush(ioc);
-}
-
-void send_pong(br_sslio_context *ioc __attribute__((unused)), char *token) {
+void send_pong(br_sslio_context *ioc, char *token) {
   int buf_len = 8 + (int)strlen(token);
   char *pong_buffer = malloc(buf_len * sizeof(char));
   snprintf(pong_buffer, buf_len, "PONG %s\r\n", token);
@@ -161,29 +184,33 @@ void send_pong(br_sslio_context *ioc __attribute__((unused)), char *token) {
   send_msg(ioc, pong_buffer, strlen(pong_buffer));
 }
 
-typedef struct {
-  char *name;
-  void (*handler)(br_sslio_context *ioc, char *str);
-} Command;
+void handle_ping(br_sslio_context *ioc, char *msg) { send_pong(ioc, msg); }
 
-void handle_ping(br_sslio_context *ioc, char *str) {
-  // char *token_buffer =
-  //     (char *)malloc(sizeof(char) * command_end - command_start + 1);
-
-  // memcpy(token_buffer, buffer[command_start + strlen(ping_command)],
-  // command_end - command_start);
-  send_pong(ioc, str);
-}
-
-Command table[] = {
+Command_Handler handlers[] = {
     {"PING", handle_ping},
     {NULL, NULL},
 };
 
-void dispatch(br_sslio_context *ioc, char *str) {
-  for (int i = 0; table[i].name != NULL; i++) {
-    if (strncmp(str, table[i].name, strlen(table[i].name)) == 0) {
-      table[i].handler(ioc, &str[strlen(table[i].name) + 1]);
+void register_conn(br_sslio_context *ioc) {
+  char *connection_message = "CAP LS 302\r\n"
+                             "PASS password\r\n"
+                             "NICK ben\r\n"
+                             "USER ben 0 * :Ben M\r\n"
+                             "CAP END\r\n";
+  send_msg(ioc, connection_message, strlen(connection_message));
+}
+
+void send_quit(br_sslio_context *ioc) {
+  char *quit = "QUIT :Gone to have lunch\r\n";
+  send_msg(ioc, quit, strlen(quit));
+}
+
+void dispatch(br_sslio_context *ioc, char *msg) {
+  for (int i = 0; handlers[i].name != NULL; i++) {
+    // if we handle this command, then call the handler, passing in the rest of
+    // the message after the command
+    if (strncmp(msg, handlers[i].name, strlen(handlers[i].name)) == 0) {
+      handlers[i].handler(ioc, &(msg[strlen(handlers[i].name) + 1]));
       return;
     }
   }
@@ -198,114 +225,75 @@ void strip_crlf(char *str, int max_len) {
   }
 }
 
-void handle_message(br_sslio_context *ioc, char *buffer) {
+void handle_message(br_sslio_context *ioc, char *msg) {
   // check if buffer starts with the source/prefix, consume it if so
-  // prefix must start with :
   int i = 0;
-  if (buffer[i] == ':') {
-    while (buffer[i] != ' ') {
-      assert(buffer[i] != '\0');
+  if (msg[i] == ':') {
+    while (msg[i] != ' ') {
+      assert(msg[i] != '\0');
       ++i;
     }
   }
 
-  int command_start = i;
-
-  dispatch(ioc, &buffer[command_start]);
+  dispatch(ioc, &msg[i]);
 }
 
 int main(void) {
   // char *host = "irc.libera.chat";
   char *host = "testnet.ergo.chat";
+
   // output struct for getaddrinfo
   struct addrinfo info;
 
   // set up SSL connection
-  int fd;
-  br_ssl_client_context sc;
-  br_x509_minimal_context xc;
-  unsigned char iobuf[BR_SSL_BUFSIZE_BIDI];
-  br_sslio_context ioc;
-  {
-    fd = host_connect(host, &info);
+  SSL_Connection conn;
+  setup_SSL(&conn, host, info);
+  register_conn(&conn.ioc);
 
-    br_ssl_client_init_full(&sc, &xc, TAs, TAs_NUM);
-    br_ssl_engine_set_buffer(&sc.eng, iobuf, sizeof iobuf, 1);
-    br_ssl_client_reset(&sc, host, 0);
-    br_sslio_init(&ioc, &sc.eng, sock_read, &fd, sock_write, &fd);
-  }
-
-  // message formats
-  // stream of bytes, separated by CRLF, UTF-8 encoded
-  // only process a message once fully read until the CRLF
-  // message structure:
-  // 512 bytes max, unless there are tags, in which case allow 8191 additional
-  // bytes
-  // <message> = @<tags> :<source> command parameters
-  // <tags> = <key>=<value>;<key>=<value>
-  // don't send more than 15 parameters, but accept any number
-  // ignore empty lines
-  register_conn(&ioc);
-
-  // fd_set readfds;
-  // FD_ZERO(&readfds);
-  // FD_SET(sockfd, &readfds);
-  // FD_SET(STDIN_FILENO, &readfds);
-
-  // if (select(sockfd + 1, &readfds, NULL, NULL, NULL) > 0) {
-  //     if (FD_ISSET(sockfd, &readfds)) {
-  //         rlen = br_sslio_read(&ioc, tmp, sizeof tmp);
-  //         ...
-  //     }
-  //     if (FD_ISSET(STDIN_FILENO, &readfds)) {
-  //         // read from stdin
-  //     }
-  // }
-  char buffer[100];
-  /*
-   * Read the server's response. We use here a small 512-byte buffer,
-   * but most of the buffering occurs in the client context: the
-   * server will send full records (up to 16384 bytes worth of data
-   * each), and the client context buffers one full record at a time.
-   */
+  int rlen;
+  char input_buffer[100];
+  char response_buffer[512];
 
   for (;;) {
     fd_set readfds;
     FD_ZERO(&readfds);
-    FD_SET(fd, &readfds);
+    FD_SET(conn.fd, &readfds);
     FD_SET(STDIN_FILENO, &readfds);
-    int rlen;
-    char tmp[512];
 
-    if (select(fd + 1, &readfds, NULL, NULL, NULL) > 0) {
-      if (FD_ISSET(fd, &readfds)) {
-        rlen = br_sslio_read(&ioc, tmp, sizeof tmp);
+    if (select(conn.fd + 1, &readfds, NULL, NULL, NULL) > 0) {
+      /*
+       * Read the server's response. We use here a small 512-byte buffer,
+       * but most of the buffering occurs in the client context: the
+       * server will send full records (up to 16384 bytes worth of data
+       * each), and the client context buffers one full record at a time.
+       */
+      if (FD_ISSET(conn.fd, &readfds)) {
+        rlen =
+            br_sslio_read(&conn.ioc, response_buffer, sizeof response_buffer);
         if (rlen < 0) {
           printf("breaking\n");
           break;
         }
-        strip_crlf(tmp, sizeof(tmp));
+        strip_crlf(response_buffer, sizeof(response_buffer));
 
-        handle_message(&ioc, tmp);
+        handle_message(&conn.ioc, response_buffer);
 
-        // printf("PRINT TMP TEST (rlen = %d): %s\n", rlen, tmp);
-        // printf("PRINT TMP TEST DONE");
-        fwrite(tmp, 1, rlen, stdout);
+        fwrite(response_buffer, 1, rlen, stdout);
         fflush(stdout);
       }
       if (FD_ISSET(STDIN_FILENO, &readfds)) {
-        fgets(buffer, sizeof(buffer), stdin);
+        fgets(input_buffer, sizeof(input_buffer), stdin);
 
-        printf("%s\n", buffer);
-        if (strchr(buffer, 'q') != NULL) {
+        printf("%s\n", input_buffer);
+        if (strchr(input_buffer, 'q') != NULL) {
           printf("quitting...\n");
-          send_quit(&ioc);
+          send_quit(&conn.ioc);
         }
       }
     }
   }
 
-  close(fd);
+  close(conn.fd);
 
   return 0;
 }
