@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <errno.h>
 #include <netinet/in.h>
 #include <stdlib.h>
@@ -145,16 +146,72 @@ void register_conn(br_sslio_context *ioc) {
   br_sslio_flush(ioc);
 }
 
-void quit(br_sslio_context *ioc) {
+void send_quit(br_sslio_context *ioc) {
   char *quit = "QUIT :Gone to have lunch";
   send_msg(ioc, quit, strlen(quit));
   br_sslio_flush(ioc);
 }
 
-void parse_message(char *buffer, char *server_name) {
+void send_pong(br_sslio_context *ioc __attribute__((unused)), char *token) {
+  int buf_len = 8 + (int)strlen(token);
+  char *pong_buffer = malloc(buf_len * sizeof(char));
+  snprintf(pong_buffer, buf_len, "PONG %s\r\n", token);
+  printf("%s\n", pong_buffer);
+  printf("pong buffer len: %lu \n", strlen(pong_buffer));
+  send_msg(ioc, pong_buffer, strlen(pong_buffer));
+}
+
+typedef struct {
+  char *name;
+  void (*handler)(br_sslio_context *ioc, char *str);
+} Command;
+
+void handle_ping(br_sslio_context *ioc, char *str) {
+  // char *token_buffer =
+  //     (char *)malloc(sizeof(char) * command_end - command_start + 1);
+
+  // memcpy(token_buffer, buffer[command_start + strlen(ping_command)],
+  // command_end - command_start);
+  send_pong(ioc, str);
+}
+
+Command table[] = {
+    {"PING", handle_ping},
+    {NULL, NULL},
+};
+
+void dispatch(br_sslio_context *ioc, char *str) {
+  for (int i = 0; table[i].name != NULL; i++) {
+    if (strncmp(str, table[i].name, strlen(table[i].name)) == 0) {
+      table[i].handler(ioc, &str[strlen(table[i].name) + 1]);
+      return;
+    }
+  }
+}
+
+void strip_crlf(char *str, int max_len) {
+  for (int i = 0; i < max_len - 1; ++i) {
+    if (str[i] == '\r' && str[i + 1] == '\n') {
+      str[i] = '\0';
+      break;
+    }
+  }
+}
+
+void handle_message(br_sslio_context *ioc, char *buffer) {
   // check if buffer starts with the source/prefix, consume it if so
-  // read until colon or end of message to figure out command
-  // switch behavior based on command
+  // prefix must start with :
+  int i = 0;
+  if (buffer[i] == ':') {
+    while (buffer[i] != ' ') {
+      assert(buffer[i] != '\0');
+      ++i;
+    }
+  }
+
+  int command_start = i;
+
+  dispatch(ioc, &buffer[command_start]);
 }
 
 int main(void) {
@@ -218,7 +275,7 @@ int main(void) {
     FD_SET(fd, &readfds);
     FD_SET(STDIN_FILENO, &readfds);
     int rlen;
-    unsigned char tmp[512];
+    char tmp[512];
 
     if (select(fd + 1, &readfds, NULL, NULL, NULL) > 0) {
       if (FD_ISSET(fd, &readfds)) {
@@ -227,6 +284,12 @@ int main(void) {
           printf("breaking\n");
           break;
         }
+        strip_crlf(tmp, sizeof(tmp));
+
+        handle_message(&ioc, tmp);
+
+        // printf("PRINT TMP TEST (rlen = %d): %s\n", rlen, tmp);
+        // printf("PRINT TMP TEST DONE");
         fwrite(tmp, 1, rlen, stdout);
         fflush(stdout);
       }
@@ -236,7 +299,7 @@ int main(void) {
         printf("%s\n", buffer);
         if (strchr(buffer, 'q') != NULL) {
           printf("quitting...\n");
-          quit(&ioc);
+          send_quit(&ioc);
         }
       }
     }
