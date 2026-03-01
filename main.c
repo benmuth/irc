@@ -2,6 +2,7 @@
 #include <netinet/in.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/select.h>
 #include <sys/socket.h>
 
 #include "BearSSL/inc/bearssl_ssl.h"
@@ -135,12 +136,25 @@ void register_conn(br_sslio_context *ioc) {
   char *pass = "PASS password\r\n";
   char *nick_user = "NICK ben\r\nUSER ben 0 * :Ben M\r\n";
   char *cap_end = "CAP END\r\n";
-  send_msg(ioc, capability_negotiation_start, strlen(capability_negotiation_start));
+  send_msg(ioc, capability_negotiation_start,
+           strlen(capability_negotiation_start));
   send_msg(ioc, pass, strlen(pass));
   send_msg(ioc, nick_user, strlen(nick_user));
 
   send_msg(ioc, cap_end, strlen(cap_end));
   br_sslio_flush(ioc);
+}
+
+void quit(br_sslio_context *ioc) {
+  char *quit = "QUIT :Gone to have lunch";
+  send_msg(ioc, quit, strlen(quit));
+  br_sslio_flush(ioc);
+}
+
+void parse_message(char *buffer, char *server_name) {
+  // check if buffer starts with the source/prefix, consume it if so
+  // read until colon or end of message to figure out command
+  // switch behavior based on command
 }
 
 int main(void) {
@@ -164,7 +178,6 @@ int main(void) {
     br_sslio_init(&ioc, &sc.eng, sock_read, &fd, sock_write, &fd);
   }
 
-
   // message formats
   // stream of bytes, separated by CRLF, UTF-8 encoded
   // only process a message once fully read until the CRLF
@@ -177,21 +190,56 @@ int main(void) {
   // ignore empty lines
   register_conn(&ioc);
 
+  // fd_set readfds;
+  // FD_ZERO(&readfds);
+  // FD_SET(sockfd, &readfds);
+  // FD_SET(STDIN_FILENO, &readfds);
+
+  // if (select(sockfd + 1, &readfds, NULL, NULL, NULL) > 0) {
+  //     if (FD_ISSET(sockfd, &readfds)) {
+  //         rlen = br_sslio_read(&ioc, tmp, sizeof tmp);
+  //         ...
+  //     }
+  //     if (FD_ISSET(STDIN_FILENO, &readfds)) {
+  //         // read from stdin
+  //     }
+  // }
+  char buffer[100];
   /*
    * Read the server's response. We use here a small 512-byte buffer,
    * but most of the buffering occurs in the client context: the
    * server will send full records (up to 16384 bytes worth of data
    * each), and the client context buffers one full record at a time.
    */
+
   for (;;) {
+    fd_set readfds;
+    FD_ZERO(&readfds);
+    FD_SET(fd, &readfds);
+    FD_SET(STDIN_FILENO, &readfds);
     int rlen;
     unsigned char tmp[512];
 
-    rlen = br_sslio_read(&ioc, tmp, sizeof tmp);
-    if (rlen < 0) {
-      break;
+    if (select(fd + 1, &readfds, NULL, NULL, NULL) > 0) {
+      if (FD_ISSET(fd, &readfds)) {
+        rlen = br_sslio_read(&ioc, tmp, sizeof tmp);
+        if (rlen < 0) {
+          printf("breaking\n");
+          break;
+        }
+        fwrite(tmp, 1, rlen, stdout);
+        fflush(stdout);
+      }
+      if (FD_ISSET(STDIN_FILENO, &readfds)) {
+        fgets(buffer, sizeof(buffer), stdin);
+
+        printf("%s\n", buffer);
+        if (strchr(buffer, 'q') != NULL) {
+          printf("quitting...\n");
+          quit(&ioc);
+        }
+      }
     }
-    fwrite(tmp, 1, rlen, stdout);
   }
 
   close(fd);
